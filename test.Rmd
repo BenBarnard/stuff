@@ -1,0 +1,152 @@
+---
+title: "test"
+output:html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+
+library(tidyverse)
+library(magrittr)
+library(glue)
+library(r2d3)
+library(png)
+library(forecast)
+```
+
+```{r}
+
+time_series <- arima.sim(model = list(order = c(0,1,0)), n = 49, mean = 1000, sd = 20000)
+
+ggplot(data = time_series, aes(x = seq(1,50), y = time_series)) +
+  geom_line(size = 1) +
+  geom_point(shape = 21, size = 2, stroke = 1.5) + 
+  geom_smooth(method = "loess", se = FALSE, color = "purple", linetype = "dashed", size = 2) + 
+  theme_bw() +
+  theme(axis.text.x = element_blank(),
+        axis.title.x = element_blank(),
+        axis.ticks.x = element_blank(),
+        axis.text.y = element_blank(),
+        axis.title.y = element_blank(),
+        axis.ticks.y = element_blank(),
+        panel.border = element_blank()) +
+  scale_y_continuous(breaks = seq(min(time_series) - 10, max(time_series) + 10,
+                                  ceiling((max(time_series) - min(time_series)) / 2))) + 
+  scale_x_continuous(breaks = seq(0, 50, 24.5)) ->
+  plot
+  
+ggsave(plot,filename = "images/plot2.png", dpi = 96, height = 7.5, width = 13.33, units = "in")
+```
+
+```{r}
+# Public website, public sheet
+
+image <- png::readPNG('images/plot2.png')[,,1]
+
+width <- ncol(image)
+height <- nrow(image)
+
+middle_tidy <- image %>% 
+  as_tibble() %>% 
+  set_colnames(1:width) %>% 
+  mutate(y = 1:height) %>% 
+  gather(x, value, -y) %>% 
+  filter(value == 0) %>% 
+  transmute(
+    x = as.integer(x)/width,
+    y = y/height,
+    dist_from_center = (x - 0.5)^2 + (y - 0.5)^2
+  ) %>% 
+  arrange(dist_from_center) %>% 
+  select(-dist_from_center)
+
+image_tidy <- middle_tidy %>%
+  bind_rows(middle_tidy) 
+
+```
+
+```{r}
+
+image_plot <- readPNG('images/plot2.png')
+
+
+width <- ncol(image_plot[,,1])
+height <- nrow(image_plot[,,1])
+
+plot_middle <- image_plot[,,1] %>% 
+  as_tibble() %>% 
+  set_colnames(1:width) %>% 
+  mutate(y = 1:height) %>% 
+  gather(x, color, -y) %>%
+  select(-color) %>%
+  bind_cols(unclass(as.raster(image_plot)) %>%
+              as_tibble() %>% 
+              set_colnames(1:width) %>% 
+              mutate(y = 1:height) %>% 
+              gather(x, ncolor, -y) %>%
+              select(ncolor)) %>%
+  filter(!(ncolor %in% c("#FFFFFFFF", "#FFFFFF"))) %>%
+  transmute(
+    x = as.integer(x)/width,
+    y = y/height,
+    ncolor = ncolor,
+    dist_from_center = (x - 0.5)^2 + (y - 0.5)^2
+  ) %>% 
+  arrange(dist_from_center) %>% 
+  select(-dist_from_center)
+
+plot_tidy <- plot_middle #%>%
+  # bind_rows(data.frame(x = rep(0, nrow(image_tidy) - nrow(plot_middle)),
+  #                      y = rep(0, nrow(image_tidy) - nrow(plot_middle)),
+  #                      color = rep("#FFFFFFF", nrow(image_tidy) - nrow(plot_middle))))
+
+```
+
+
+
+```{r, include = FALSE}
+num_points <- nrow(plot_tidy)
+
+num_lines <- 25
+num_x_points <- ceiling(num_points/num_lines)
+
+x <- seq(0,1,length.out = num_x_points)
+
+get_beta <- function(shape1, shape2){
+  tibble(
+    x = x, 
+    y = dbeta(x,shape1 = shape1, shape2 = shape2),
+    class = glue::glue('{shape1},{shape2}')
+  )
+}
+beta_data <- expand.grid(
+  shape1 = 2,
+  shape2 = seq(1.5, 10, length.out = num_lines)
+) %$% 
+  purrr::map2_df(shape1, shape2, get_beta) %>% 
+  head(num_points) %>% 
+  mutate(y = -y/max(y) + 1)
+
+ ggplot(beta_data, aes(x = x, y = y, color = class)) +
+   geom_line() +
+   guides(color = FALSE)
+
+htmltools::tagList(rmarkdown::html_dependency_font_awesome())
+```
+
+
+
+```{r headerPlot}
+r2d3::r2d3(
+  data = list(beta = beta_data, text = plot_tidy), 
+  dependencies = c('javascript/regl.min.js', "javascript/helpers.js"), 
+  container = 'div', 
+  width = "100%",
+  script = "javascript/particles.js")
+```
+
+
+
+
+
+
